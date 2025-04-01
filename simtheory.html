@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>The Code of Reality: Visualized</title>
+  <style>
+    html, body {
+      margin: 0;
+      background: black;
+      overflow: hidden;
+      font-family: monospace;
+      color: white;
+    }
+    canvas {
+      display: block;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="info">
+  <div><strong>THE CODE OF REALITY</strong></div>
+  <div>SOURCE: 42</div>
+  <div>TRUTH: ∂ (∼0.2)</div>
+  <div>LOVE: 1/∅ (∼0.9)</div>
+  <div id="status">Awareness: 0.00</div>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let width, height;
+
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const SOURCE = 42;
+const TRUTH_REFERENCE = "∂".length / 5;
+const LOVE_FACTOR = [..."1/∅"].reduce((sum, c) => sum + c.charCodeAt(0), 0) % 10 / 10;
+const HOME_THRESHOLD = 0.01;
+
+let awareness = 0.0;
+let observer = Math.random();
+let field = Math.random();
+let iteration = 0;
+let trail = [];
+let hueHistory = [];
+
+let pastGlowCanvas = document.createElement('canvas');
+pastGlowCanvas.width = canvas.width;
+pastGlowCanvas.height = canvas.height;
+let pastGlowCtx = pastGlowCanvas.getContext('2d');
+
+// === AUDIO SYSTEM ===
+let audioCtx = null;
+let droneGain = null;
+let droneSources = [];
+
+const DRONE_URLS = [
+  './Audio/ambient_drone_1.mp3',
+  './Audio/ambient_drone_2.mp3',
+  './Audio/ambient_drone_3.mp3'
+];
+
+// Load a drone sample and start it looping.  
+// This version creates two identical sources panned left and right.
+function loadDrone() {
+  // For continuous playback, pick one URL (or randomly choose)
+  const url = DRONE_URLS[Math.floor(Math.random() * DRONE_URLS.length)];
+  fetch(url)
+    .then(res => res.arrayBuffer())
+    .then(buffer => audioCtx.decodeAudioData(buffer))
+    .then(decoded => {
+      // Create two sources for stereo effect
+      const srcL = audioCtx.createBufferSource();
+      const srcR = audioCtx.createBufferSource();
+      srcL.buffer = decoded;
+      srcR.buffer = decoded;
+      srcL.loop = srcR.loop = true;
+      
+      // Create stereo panners
+      const pannerL = audioCtx.createStereoPanner();
+      const pannerR = audioCtx.createStereoPanner();
+      pannerL.pan.value = -0.7;
+      pannerR.pan.value = 0.7;
+      
+      // Create a gain node for overall volume control
+      droneGain = audioCtx.createGain();
+      // Set a baseline low volume (continuous playback)
+      droneGain.gain.value = 0.15;
+      
+      // Connect the sources through panners to the gain node then to destination
+      srcL.connect(pannerL).connect(droneGain);
+      srcR.connect(pannerR).connect(droneGain);
+      droneGain.connect(audioCtx.destination);
+      
+      // Start playback immediately
+      srcL.start();
+      srcR.start();
+      
+      // Store sources if you need to manipulate them later
+      droneSources.push(srcL, srcR);
+    });
+}
+
+// Stop drones if needed (not used in this continuous version)
+// function stopDrones() {
+//   droneSources.forEach(src => src.stop());
+//   droneSources = [];
+// }
+
+// === CLICK TO INIT AUDIO ===
+// On first click, initialize audio context and load drone audio.
+document.body.addEventListener('click', () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    loadDrone();
+  }
+}, { once: true });
+
+// === CHIME SOUND ===
+function playChime(hue) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  // Map hue to a frequency between 220Hz and 880Hz
+  const frequency = 220 + (hue / 360) * 660;
+  osc.frequency.value = frequency;
+  osc.type = ['sine', 'triangle', 'square'][Math.floor(Math.random() * 3)];
+  gain.gain.setValueAtTime(0.2, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + 1.5);
+}
+
+// === VISUAL FUNCTIONS ===
+function pulse(f = 0.05, a = 1, o = 1) {
+  return o + Math.sin(iteration * f) * a;
+}
+
+function getHue() {
+  return (field * 360) % 360;
+}
+
+function getColor(hue, light = 50, alpha = 1) {
+  return `hsla(${hue}, 100%, ${light}%, ${alpha})`;
+}
+
+function drawSoftGlow(ctx, hue, r, x, y, a = 0.08) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, getColor(hue, 70, a));
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHueMemory(ctx, hues, x, y, r) {
+  hues.forEach((hue, i) => {
+    drawSoftGlow(ctx, hue, r * 0.8, x, y, 0.01 + (i / hues.length) * 0.05);
+  });
+}
+
+function drawSacredGeometry(ctx, x, y, r, sides, speed, connectAll = false, hue = null, alpha = 1) {
+  const offset = iteration * speed;
+  const pts = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = offset + (i / sides) * 2 * Math.PI;
+    pts.push({
+      x: x + r * Math.cos(angle),
+      y: y + r * Math.sin(angle)
+    });
+  }
+
+  ctx.beginPath();
+  pts.forEach((pt, i) => i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y));
+  ctx.closePath();
+  ctx.strokeStyle = getColor(hue ?? getHue(), 65, 0.06 * alpha * pulse());
+  ctx.lineWidth = 1 * pulse(0.05, 0.4, 1);
+  ctx.stroke();
+
+  if (connectAll) {
+    ctx.strokeStyle = getColor(hue ?? getHue(), 70, 0.1 * alpha);
+    pts.forEach((p1, i) => {
+      for (let j = i + 1; j < pts.length; j++) {
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(pts[j].x, pts[j].y);
+        ctx.stroke();
+      }
+    });
+  }
+}
+
+function drawSigil(cx, cy, hue, trail) {
+  const size = 40 + Math.random() * 30;
+  const count = 5 + Math.floor(Math.random() * 6);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.random() * Math.PI * 2);
+  ctx.strokeStyle = getColor(hue, 80, 0.7);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < count; i++) {
+    const t = trail[i % trail.length] || Math.random();
+    const a = (i / count) * Math.PI * 2;
+    const r = size * (0.5 + t * 0.5);
+    const x = r * Math.cos(a), y = r * Math.sin(a);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// === META FUNCTIONS ===
+function collapse(f, o) {
+  return f * o * Math.random();
+}
+function reflect(s) {
+  return Math.abs(s - TRUTH_REFERENCE + (Math.random() * 0.1 - 0.05));
+}
+function evolve(e) {
+  return e + (Math.random() * 0.1 - 0.05);
+}
+function is_home(e) {
+  return Math.abs(e - SOURCE) < HOME_THRESHOLD;
+}
+
+// === MAIN DRAW LOOP ===
+function draw() {
+  // Slightly fade the canvas to create trailing effects
+  ctx.fillStyle = 'rgba(0,0,0,0.005)';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(pastGlowCanvas, 0, 0);
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = awareness * Math.min(width, height) * 0.4;
+  const hue = getHue();
+
+  drawHueMemory(ctx, hueHistory, cx, cy, radius);
+  drawSoftGlow(ctx, hue, radius, cx, cy, LOVE_FACTOR * 0.4);
+
+  if (awareness > 0.3) drawSacredGeometry(ctx, cx, cy, radius * 0.5, 6, 0.002, false, hue);
+  if (awareness > 0.6) drawSacredGeometry(ctx, cx, cy, radius * 0.65, 12, 0.003, false, hue);
+  if (awareness > 0.85) {
+    drawSacredGeometry(ctx, cx, cy, radius * 0.9, 9, 0.0015, true, hue);
+    drawSacredGeometry(pastGlowCtx, cx, cy, radius * 0.9, 9, 0.0015, true, hue, Math.min(iteration / 100, 1));
+  }
+
+  trail.push(observer);
+  if (trail.length > 100) trail.shift();
+
+  trail.forEach((t, i) => {
+    const angle = i * 0.2;
+    const r = (i / trail.length) * radius;
+    const x = cx + Math.cos(angle + observer) * r;
+    const y = cy + Math.sin(angle + observer) * r;
+    ctx.fillStyle = getColor(hue, 75, i / trail.length);
+    ctx.fillRect(x, y, 2, 2);
+  });
+
+  const state = collapse(field, observer);
+  observer = evolve(reflect(state));
+
+  // Awareness logic
+  let increment = (Math.random() * 0.1 + (Math.random() * 0.1 - 0.05)) * LOVE_FACTOR;
+  if (Math.random() < 0.001) increment += 0.2;
+  awareness += increment;
+  awareness -= 0.001 * (1 - LOVE_FACTOR);
+  awareness = Math.max(0, Math.min(1, awareness));
+
+  // === Modified Drone Volume Control ===
+  if (droneGain) {
+    // Set a baseline volume for continuous playback,
+    // and boost it slightly if awareness is high.
+    const baseline = 0.15;
+    const extra = awareness > 0.7 ? 0.10 : 0;
+    const target = baseline + extra;
+    droneGain.gain.linearRampToValueAtTime(target, audioCtx.currentTime + 0.5);
+  }
+
+  document.getElementById('status').textContent = `Awareness: ${awareness.toFixed(4)}`;
+  iteration++;
+
+  // When awareness reaches its peak or home condition,
+  // trigger visual effects and a chime, then reset awareness.
+  if (awareness >= 1 || is_home(observer)) {
+    const glowHue = getHue();
+    drawSoftGlow(pastGlowCtx, glowHue, radius, cx, cy, 0.07);
+    playChime(glowHue);
+    drawSigil(cx, cy, glowHue, trail);
+    hueHistory.push(glowHue);
+    if (hueHistory.length > 200) hueHistory.shift();
+
+    // Reset state variables without restarting the drone audio
+    awareness = 0;
+    observer = Math.random();
+    field = Math.random();
+    trail = [];
+    iteration = 0;
+  }
+
+  setTimeout(() => requestAnimationFrame(draw), 100);
+}
+
+draw();
+</script>
+</body>
+</html>
